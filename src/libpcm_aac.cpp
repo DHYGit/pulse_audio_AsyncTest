@@ -25,7 +25,7 @@ static int32_t latency_msec = 1, process_time_msec = 1;
 #define pa_zero(x) (pa_memzero(&(x), sizeof(x)))
 
 int fdout;
-char *fname = "tmp.s16";
+//char *fname = "tmp.s16";
 int verbose = 1;
 int ret;
 static pa_stream_flags_t flags;
@@ -51,10 +51,10 @@ void stream_state_callback(pa_stream *s, void *userdata)
     switch(status){
         case PA_STREAM_CREATING:
             printf("Creating stream\n");
-            fdout = creat(fname, 0711);
+            //fdout = creat(fname, 0711);
             break;
         case PA_STREAM_TERMINATED:
-            close(fdout);
+            //close(fdout);
             break;
         case PA_STREAM_READY:
             if(verbose)
@@ -84,6 +84,7 @@ void stream_state_callback(pa_stream *s, void *userdata)
 
 extern std::queue <AudioDataStruct> *audio_cache_queue;
 extern pthread_mutex_t audio_cache_lock;
+extern int Alsa2PCMCallback(unsigned char*buff, int len, void*args);
 static struct timeval tv1, tv2;
 unsigned char pcmbuf[40 * 1024];
 unsigned int pcmoffset = 0;
@@ -100,7 +101,7 @@ static void stream_read_callback(pa_stream *s, size_t length, void *userdata)
     int i = 0;
     char *ptr = NULL;
     AudioDataStruct audio_data;
-    while(1){
+    while(pa_stream_readable_size(s) > 0){
         printf("pcm date length:%d \n", pa_stream_readable_size(s));
         if(pa_stream_readable_size(s) > 0)
         {
@@ -111,6 +112,8 @@ static void stream_read_callback(pa_stream *s, size_t length, void *userdata)
                 exit(1);
                 return;
             }
+            //Alsa2PCMCallback((unsigned char*)data, length, NULL);
+            
             if(pcmoffset < 2 * 1024)
             {
                 memcpy(pcmbuf + pcmoffset, data, length);
@@ -118,13 +121,13 @@ static void stream_read_callback(pa_stream *s, size_t length, void *userdata)
             }else{
                 ptr = (char*)pcmbuf;
                 if(pcmoffset >= 2048){
+                    pthread_mutex_lock(&audio_cache_lock);
                     memcpy(audio_data.data, ptr, 2048);
                     audio_data.len = 2048;
-                    pthread_mutex_lock(&audio_cache_lock);
                     audio_cache_queue->push(audio_data);
-                    pthread_mutex_unlock(&audio_cache_lock);
                     pcmoffset -= 2048;
                     ptr += 2048;
+                    pthread_mutex_unlock(&audio_cache_lock);
                 }
             }
             pa_stream_drop(s);
@@ -252,60 +255,28 @@ int Alsa2PCM::Init(Stream_Record_Info stream_info,OnMessages proc,void*args)
         }
 		memset(Rec_Buff,0,Rec_Buff_Size);
 	}else if(stream_info.pcm_type == PCM_TYPE_PULSEaUDIO){
-        thread_pa_async((void *)proc);
-       /* pthread_t pa_async_pid;
+        static const pa_sample_spec ss = {
+            .format = PA_SAMPLE_S16LE,
+            .rate = 16000,
+            .channels = stream_info.Channel
+        };
+        int res = PulseAudioInit(&g_pulse_handle, ss);
+        if(res){
+            LOG(false, function + " pulse audio player Init failed");
+            return -1;
+        }
+        LOG(true, function + " pulse audio player Init success");
+        pthread_t pa_async_pid;
         if (pthread_create(&pa_async_pid, NULL, thread_pa_async, (void *)proc) < 0)
         {
             printf("Cannot create thread to async pulseaudio!\n");
             sleep(10);
             exit(1);
-        }*/
+        }
     }else{
         return -1;
 	}
-    m_on_proc = proc;
-    m_video_audio_proc = args;
 	return 0;
-}
-
-int Alsa2PCM::Process()
-{
-    std::string function = __FUNCTION__;
-	int rc = 0;
-	printf("In Alsa2PCM Process \n");
-    LOG(true, "In " + function);
-	//while (pStream_Record_Info) 
-    while(1)
-	{ 
-		if(m_pcm_type == PCM_TYPE_ALSA)
-		{
-			rc = snd_pcm_readi(record_handle, Rec_Buff, pStream_Record_Info->Frames); 
-			if (rc == -EPIPE) /* EPIPE means overrun */ 
-			{  	 
-				fprintf(stderr, "overrun occurred\n");  
-                LOG(false, function + " snd_pcm_readi overrun occurred");
-				snd_pcm_prepare(record_handle);  
-			} 
-			else if (rc < 0) 
-			{ 
-				fprintf(stderr,"error from read: %s\n",snd_strerror(rc));
-                LOG(false, function + " snd_pcm_readi read failed");
-			} 
-			else if (rc != (int)pStream_Record_Info->Frames)
-			{  
-				fprintf(stderr, "short read, read %d frames\n", rc);
-                LOG(false, function + " snd_pcm_readi short read");
-			}
-			else
-			{  	
-				if(Rec_Buff && Rec_Buff_Size>0)
-					m_on_proc(Rec_Buff,Rec_Buff_Size,m_video_audio_proc);
-			}
-		}else if(m_pcm_type == PCM_TYPE_PULSEaUDIO){
-		}else{
-
-		}
-	}
 }
 
 int Alsa2PCM::UnInit(void)

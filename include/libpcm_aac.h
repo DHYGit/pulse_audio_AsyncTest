@@ -26,8 +26,8 @@
 #define EasyAACEncoder_Handle void*
 
 struct AudioDataStruct{
-        char data[2048];                                             
-            int len;
+    char data[2048];                                             
+    int len;
 };
 
 class Alsa2PCM

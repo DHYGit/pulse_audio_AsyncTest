@@ -62,7 +62,16 @@ int main(){
         LOG(false, function + " pcm_obj init failed");
         return ret;
     }
-
+    while(1){
+        if(audio_cache_queue->size() > 0){
+            pthread_mutex_lock(&audio_cache_lock);
+            AudioDataStruct audio_data = audio_cache_queue->front();
+            audio_cache_queue->pop();
+            pthread_mutex_unlock(&audio_cache_lock);
+            Alsa2PCMCallback((unsigned char*)audio_data.data, audio_data.len, NULL);
+        }
+        //sleep(10);
+    } 
     return 0;
 }
 
