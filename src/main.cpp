@@ -1,6 +1,7 @@
 #include "libpcm_aac.h"
 #include "Raspberry_Pi_Record.h"
 #include "spdlog/spdlog.h"
+#include <fstream>
 
 namespace spd = spdlog;
 
@@ -47,7 +48,7 @@ int main(){
     pthread_mutex_init(&audio_cache_lock, NULL);
 
     Stream_Record_Info s_info;
-    s_info.Channel = 1;
+    s_info.Channel = 2;
     s_info.Frames = 160;
     s_info.Rate = 16000;
     s_info.pcm_type=PCM_TYPE_PULSEaUDIO;
@@ -75,15 +76,17 @@ int main(){
     return 0;
 }
 
+std::ofstream *pcm_file = new std::ofstream("output.pcm"); 
 int Alsa2PCMCallback(unsigned char*buff, int len, void*args){
     std::string function = __FUNCTION__;
-    int ret = PulseAudioPlay(pcm_obj.g_pulse_handle, buff, len);
+	pcm_file->write((char*)buff, len);
+    /*int ret = PulseAudioPlay(pcm_obj.g_pulse_handle, buff, len);
     if(ret != 0){
         LOG(false, function + " play audio failed");
         printf("%s play audio failed+++++++++++++++++++++++++++\n", __FUNCTION__);
     }else{
         printf("%s play audio success len %d+++++++++++++++++++++++++++\n", __FUNCTION__, len);
-    }
+    }*/
     /*if(ilen == 0){
           memset(pcm_data, 0, pcm_length);
     }

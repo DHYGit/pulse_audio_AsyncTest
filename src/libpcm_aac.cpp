@@ -4,6 +4,7 @@
 #include <string>
 #include <queue>
 #include <pulse/pulseaudio.h>
+#include <fstream>
 
 extern void LOG(bool flag, std::string str);
 
@@ -86,9 +87,12 @@ extern std::queue <AudioDataStruct> *audio_cache_queue;
 extern pthread_mutex_t audio_cache_lock;
 extern int Alsa2PCMCallback(unsigned char*buff, int len, void*args);
 static struct timeval tv1, tv2;
-unsigned char pcmbuf[40 * 1024];
+char pcmbuf[40 * 1024];
 unsigned int pcmoffset = 0;
 unsigned int pcmlength = 0;
+
+
+std::ofstream *src_file = new std::ofstream("asyncSrc.pcm");
 
 static void stream_read_callback(pa_stream *s, size_t length, void *userdata)
 {
@@ -99,7 +103,6 @@ static void stream_read_callback(pa_stream *s, size_t length, void *userdata)
     gettimeofday(&tv2, NULL);
     tv1 = tv2;
     int i = 0;
-    char *ptr = NULL;
     AudioDataStruct audio_data;
     while(pa_stream_readable_size(s) > 0){
         printf("pcm date length:%d \n", pa_stream_readable_size(s));
@@ -113,23 +116,25 @@ static void stream_read_callback(pa_stream *s, size_t length, void *userdata)
                 return;
             }
             //Alsa2PCMCallback((unsigned char*)data, length, NULL);
+            src_file->write((char*)data, length);
+           
             
-            if(pcmoffset < 2 * 1024)
-            {
-                memcpy(pcmbuf + pcmoffset, data, length);
-                pcmoffset += length;
-            }else{
-                ptr = (char*)pcmbuf;
-                if(pcmoffset >= 2048){
-                    pthread_mutex_lock(&audio_cache_lock);
-                    memcpy(audio_data.data, ptr, 2048);
-                    audio_data.len = 2048;
-                    audio_cache_queue->push(audio_data);
-                    pcmoffset -= 2048;
-                    ptr += 2048;
+	    memcpy(pcmbuf + pcmoffset, data, length);
+	    pcmoffset += length;
+
+	    if(pcmoffset > 2048){
+		    pthread_mutex_lock(&audio_cache_lock);
+		    memcpy(audio_data.data, pcmbuf, 2048);
+		    audio_data.len = 2048;
+		    audio_cache_queue->push(audio_data);
+		    char tmpbuf[40 * 1024] = {0};
+		    memcpy(tmpbuf, pcmbuf + 2048, pcmoffset - 2048);
+		    memset(pcmbuf, 0, 40 * 1024);
+		    memcpy(pcmbuf, tmpbuf, pcmoffset - 2048);
+		    pcmoffset -= 2048;
                     pthread_mutex_unlock(&audio_cache_lock);
-                }
-            }
+	    }
+            
             pa_stream_drop(s);
         }
     }
@@ -224,59 +229,59 @@ void *thread_pa_async(void *arg){
 int Alsa2PCM::Init(Stream_Record_Info stream_info,OnMessages proc,void*args)
 {
     std::string function = __FUNCTION__;
-	m_pcm_type = stream_info.pcm_type;
-	if(stream_info.pcm_type == PCM_TYPE_ALSA)
-	{
-		if(!pStream_Record_Info)
-		{
-			pStream_Record_Info = (struct Stream_Record_Info *)malloc(sizeof(struct Stream_Record_Info));
-            if(pStream_Record_Info == NULL){
-                LOG(false, function + " pStream_Record_Info malloc failed");
-                return -1;
-            }
-            memset(pStream_Record_Info, 0, sizeof(Stream_Record_Info));
-			memcpy(pStream_Record_Info,&stream_info,sizeof(Stream_Record_Info));
-			printf("channelid(%d) frame(%d) rate(%d) format(%d)\n",pStream_Record_Info->Channel,pStream_Record_Info->Frames,pStream_Record_Info->Rate,pStream_Record_Info->Format);
-		}
-		//std::string dev_name = "plughw:0,0";
-		//record_handle=Raspberry_Pi_Record_Init((char*)dev_name.c_str(),pStream_Record_Info);
-		record_handle=Raspberry_Pi_Record_Init("hw:1,0",pStream_Record_Info);
-		if(record_handle<0)
-		{
-			printf("Raspberry Pi Record Init Error!\n");
-            LOG(false, function + " Raspberry Pi Record Init Error");
+    m_pcm_type = stream_info.pcm_type;
+    if(stream_info.pcm_type == PCM_TYPE_ALSA)
+    {
+	    if(!pStream_Record_Info)
+	    {
+		pStream_Record_Info = (struct Stream_Record_Info *)malloc(sizeof(struct Stream_Record_Info));
+		if(pStream_Record_Info == NULL){
+			LOG(false, function + " pStream_Record_Info malloc failed");
 			return -1;
 		}
-		Rec_Buff_Size=pStream_Record_Info->Channel*pStream_Record_Info->Frames*2;
-		Rec_Buff=(unsigned char *)malloc(Rec_Buff_Size);
-        if(Rec_Buff == NULL){
-            LOG(false, function + " Rec_Buff malloc failed");
-            return -1;
-        }
-		memset(Rec_Buff,0,Rec_Buff_Size);
-	}else if(stream_info.pcm_type == PCM_TYPE_PULSEaUDIO){
-        static const pa_sample_spec ss = {
-            .format = PA_SAMPLE_S16LE,
-            .rate = 16000,
-            .channels = stream_info.Channel
-        };
-        int res = PulseAudioInit(&g_pulse_handle, ss);
-        if(res){
-            LOG(false, function + " pulse audio player Init failed");
-            return -1;
-        }
-        LOG(true, function + " pulse audio player Init success");
-        pthread_t pa_async_pid;
-        if (pthread_create(&pa_async_pid, NULL, thread_pa_async, (void *)proc) < 0)
-        {
-            printf("Cannot create thread to async pulseaudio!\n");
-            sleep(10);
-            exit(1);
-        }
+		memset(pStream_Record_Info, 0, sizeof(Stream_Record_Info));
+		memcpy(pStream_Record_Info,&stream_info,sizeof(Stream_Record_Info));
+		printf("channelid(%d) frame(%d) rate(%d) format(%d)\n",pStream_Record_Info->Channel,pStream_Record_Info->Frames,pStream_Record_Info->Rate,pStream_Record_Info->Format);
+	    }
+	    //std::string dev_name = "plughw:0,0";
+	    //record_handle=Raspberry_Pi_Record_Init((char*)dev_name.c_str(),pStream_Record_Info);
+	    record_handle=Raspberry_Pi_Record_Init("hw:1,0",pStream_Record_Info);
+	    if(record_handle<0)
+	    {
+		    printf("Raspberry Pi Record Init Error!\n");
+		    LOG(false, function + " Raspberry Pi Record Init Error");
+		    return -1;
+	    }
+	    Rec_Buff_Size=pStream_Record_Info->Channel*pStream_Record_Info->Frames*2;
+	    Rec_Buff=(unsigned char *)malloc(Rec_Buff_Size);
+	    if(Rec_Buff == NULL){
+		    LOG(false, function + " Rec_Buff malloc failed");
+		    return -1;
+	    }
+	    memset(Rec_Buff,0,Rec_Buff_Size);
+    }else if(stream_info.pcm_type == PCM_TYPE_PULSEaUDIO){
+	    static const pa_sample_spec ss = {
+		    .format = PA_SAMPLE_S16LE,
+		    .rate = 16000,
+		    .channels = stream_info.Channel
+	    };
+	    int res = PulseAudioInit(&g_pulse_handle, ss);
+	    if(res){
+		    LOG(false, function + " pulse audio player Init failed");
+		    return -1;
+	    }
+	    LOG(true, function + " pulse audio player Init success");
+	    pthread_t pa_async_pid;
+	    if (pthread_create(&pa_async_pid, NULL, thread_pa_async, (void *)proc) < 0)
+	    {
+		    printf("Cannot create thread to async pulseaudio!\n");
+		    sleep(10);
+		    exit(1);
+	    }
     }else{
-        return -1;
-	}
-	return 0;
+	    return -1;
+    }
+    return 0;
 }
 
 int Alsa2PCM::UnInit(void)
